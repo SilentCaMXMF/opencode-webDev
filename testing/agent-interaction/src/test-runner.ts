@@ -12,6 +12,10 @@ import './agent-communication.test';
 import './context-sharing.test';
 import './conflict-resolution.test';
 import './decision-framework.test';
+import './tool-delegation.test';
+import './integration.test';
+import './performance.test';
+import './load-stress.test';
 
 // Test metadata
 const TEST_SUITE_NAME = 'Frontend Design Agent System - Agent Interaction Tests';
