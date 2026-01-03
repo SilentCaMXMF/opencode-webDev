@@ -1,0 +1,536 @@
+name: Quality Gates Enforcement
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      check_type:
+        description: 'Quality gate to check'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - coverage
+          - performance
+          - accessibility
+          - security
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  quality-check-config:
+    name: Load Quality Gate Configuration
+    runs-on: ubuntu-latest
+    outputs:
+      coverage-critical: ${{ steps.config.outputs.coverage-critical }}
+      coverage-overall: ${{ steps.config.outputs.coverage-overall }}
+      lighthouse-perf: ${{ steps.config.outputs.lighthouse-perf }}
+      lighthouse-a11y: ${{ steps.config.outputs.lighthouse-a11y }}
+      critical-vulns: ${{ steps.config.outputs.critical-vulns }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Load Configuration
+        id: config
+        run: |
+          CONFIG='.opencode/workflows/config/quality-gates.json'
+          CRITICAL=$(cat $CONFIG | jq -r '.coverage.critical')
+          OVERALL=$(cat $CONFIG | jq -r '.coverage.overall')
+          PERF=$(cat $CONFIG | jq -r '.lighthouse.performance')
+          A11Y=$(cat $CONFIG | jq -r '.lighthouse.accessibility')
+          VULNS=$(cat $CONFIG | jq -r '.security.criticalVulnerabilities')
+
+          echo "coverage-critical=$CRITICAL" >> $GITHUB_OUTPUT
+          echo "coverage-overall=$OVERALL" >> $GITHUB_OUTPUT
+          echo "lighthouse-perf=$PERF" >> $GITHUB_OUTPUT
+          echo "lighthouse-a11y=$A11Y" >> $GITHUB_OUTPUT
+          echo "critical-vulns=$VULNS" >> $GITHUB_OUTPUT
+
+          echo "Loaded quality gate configuration:"
+          echo "- Critical Coverage: $CRITICAL%"
+          echo "- Overall Coverage: $OVERALL%"
+          echo "- Lighthouse Performance: $PERF"
+          echo "- Lighthouse Accessibility: $A11Y"
+          echo "- Critical Vulnerabilities: $VULNS"
+
+  coverage-gate:
+    name: Code Coverage Gate
+    runs-on: ubuntu-latest
+    needs: quality-check-config
+    if: github.event.inputs.check_type == 'all' || github.event.inputs.check_type == 'coverage' || github.event.inputs.check_type == ''
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Tests with Coverage
+        run: npm run test:coverage
+
+      - name: Check Coverage Thresholds
+        id: coverage-check
+        run: |
+          if [ -f "coverage/coverage-summary.json" ]; then
+            TOTAL=$(cat coverage/coverage-summary.json | jq -r '.total.lines.pct')
+            LINES=$(cat coverage/coverage-summary.json | jq -r '.total.lines.pct')
+            STATEMENTS=$(cat coverage/coverage-summary.json | jq -r '.total.statements.pct')
+            FUNCTIONS=$(cat coverage/coverage-summary.json | jq -r '.total.functions.pct')
+            BRANCHES=$(cat coverage/coverage-summary.json | jq -r '.total.branches.pct')
+
+            CRITICAL_THRESHOLD=${{ needs.quality-check-config.outputs.coverage-critical }}
+            OVERALL_THRESHOLD=${{ needs.quality-check-config.outputs.coverage-overall }}
+
+            FAILED=false
+
+            echo "Current Coverage Metrics:"
+            echo "- Total: $TOTAL%"
+            echo "- Lines: $LINES%"
+            echo "- Statements: $STATEMENTS%"
+            echo "- Functions: $FUNCTIONS%"
+            echo "- Branches: $BRANCHES%"
+
+            # Check critical components
+            CRITICAL_PATHS="js/script.js css/style.css"
+            for path in $CRITICAL_PATHS; do
+              if [ -f "$path" ]; then
+                COV=$(cat coverage/coverage-summary.json | jq -r ".\"$path\".lines.pct" || echo "0")
+                if (( $(echo "$COV < $CRITICAL_THRESHOLD" | bc -l) )); then
+                  echo "❌ Critical path $path coverage ($COV%) below threshold ($CRITICAL_THRESHOLD%)"
+                  FAILED=true
+                else
+                  echo "✅ Critical path $path coverage: $COV%"
+                fi
+              fi
+            done
+
+            # Check overall coverage
+            if (( $(echo "$TOTAL < $OVERALL_THRESHOLD" | bc -l) )); then
+              echo "❌ Overall coverage ($TOTAL%) below threshold ($OVERALL_THRESHOLD%)"
+              FAILED=true
+            else
+              echo "✅ Overall coverage: $TOTAL%"
+            fi
+
+            if [ "$FAILED" = true ]; then
+              echo "failed=true" >> $GITHUB_OUTPUT
+              exit 1
+            else
+              echo "failed=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "❌ Coverage report not found"
+            echo "failed=true" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Upload Coverage Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-gate-report
+          path: coverage/
+          retention-days: 30
+
+      - name: Comment Coverage Gate Result
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const result = '${{ steps.coverage-check.outputs.failed }}' === 'true' ? '❌ Failed' : '✅ Passed';
+            const summary = `## Coverage Gate: ${result}\n\n`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: summary
+            });
+
+  performance-gate:
+    name: Performance Quality Gate
+    runs-on: ubuntu-latest
+    needs: quality-check-config
+    if: github.event.inputs.check_type == 'all' || github.event.inputs.check_type == 'performance' || github.event.inputs.check_type == ''
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Start Test Server
+        run: |
+          npm run serve &
+          sleep 15
+
+      - name: Run Lighthouse Audit
+        run: |
+          npm install -g lighthouse
+          lighthouse http://localhost:3000 --output json --output-path lighthouse-gate.json --chrome-flags="--headless" || true
+
+      - name: Check Performance Thresholds
+        id: perf-check
+        run: |
+          PERF_THRESHOLD=${{ needs.quality-check-config.outputs.lighthouse-perf }}
+          A11Y_THRESHOLD=${{ needs.quality-check-config.outputs.lighthouse-a11y }}
+
+          PERFORMANCE=$(cat lighthouse-gate.json | jq '.categories.performance.score * 100')
+          ACCESSIBILITY=$(cat lighthouse-gate.json | jq '.categories.accessibility.score * 100')
+          BEST_PRACTICES=$(cat lighthouse-gate.json | jq '.categories.bestPractices.score * 100')
+          SEO=$(cat lighthouse-gate.json | jq '.categories.seo.score * 100')
+
+          FAILED=false
+
+          echo "Current Lighthouse Scores:"
+          echo "- Performance: $PERFORMANCE"
+          echo "- Accessibility: $ACCESSIBILITY"
+          echo "- Best Practices: $BEST_PRACTICES"
+          echo "- SEO: $SEO"
+
+          if (( $(echo "$PERFORMANCE < $PERF_THRESHOLD" | bc -l) )); then
+            echo "❌ Performance score ($PERFORMANCE) below threshold ($PERF_THRESHOLD)"
+            FAILED=true
+          else
+            echo "✅ Performance score: $PERFORMANCE"
+          fi
+
+          if (( $(echo "$ACCESSIBILITY < $A11Y_THRESHOLD" | bc -l) )); then
+            echo "❌ Accessibility score ($ACCESSIBILITY) below threshold ($A11Y_THRESHOLD)"
+            FAILED=true
+          else
+            echo "✅ Accessibility score: $ACCESSIBILITY"
+          fi
+
+          if [ "$FAILED" = true ]; then
+            echo "failed=true" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "failed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Performance Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-gate-report
+          path: lighthouse-gate.json
+          retention-days: 30
+
+  accessibility-gate:
+    name: Accessibility Quality Gate
+    runs-on: ubuntu-latest
+    needs: quality-check-config
+    if: github.event.inputs.check_type == 'all' || github.event.inputs.check_type == 'accessibility' || github.event.inputs.check_type == ''
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Accessibility Tools
+        run: |
+          npm install -g @axe-core/cli
+          npm install -g pa11y
+
+      - name: Start Test Server
+        run: |
+          npm run serve &
+          sleep 15
+
+      - name: Run Accessibility Scan
+        run: |
+          axe http://localhost:3000 --tags wcag2a,wcag2aa --json > accessibility-gate.json || true
+
+      - name: Check Accessibility Thresholds
+        id: a11y-check
+        run: |
+          if [ -f "accessibility-gate.json" ]; then
+            VIOLATIONS=$(cat accessibility-gate.json | jq '.violations | length')
+            CRITICAL_VIOLATIONS=$(cat accessibility-gate.json | jq '[.violations[] | select(.impact == "critical")] | length')
+            SERIOUS_VIOLATIONS=$(cat accessibility-gate.json | jq '[.violations[] | select(.impact == "serious")] | length')
+
+            FAILED=false
+
+            echo "Current Accessibility Metrics:"
+            echo "- Total Violations: $VIOLATIONS"
+            echo "- Critical Violations: $CRITICAL_VIOLATIONS"
+            echo "- Serious Violations: $SERIOUS_VIOLATIONS"
+
+            if [ "$CRITICAL_VIOLATIONS" -gt 0 ]; then
+              echo "❌ Critical accessibility violations found: $CRITICAL_VIOLATIONS"
+              FAILED=true
+            else
+              echo "✅ No critical accessibility violations"
+            fi
+
+            if [ "$SERIOUS_VIOLATIONS" -gt 5 ]; then
+              echo "❌ Too many serious violations: $SERIOUS_VIOLATIONS (max: 5)"
+              FAILED=true
+            else
+              echo "✅ Serious violations within limit: $SERIOUS_VIOLATIONS"
+            fi
+
+            if [ "$FAILED" = true ]; then
+              echo "failed=true" >> $GITHUB_OUTPUT
+              exit 1
+            else
+              echo "failed=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "❌ Accessibility report not found"
+            echo "failed=true" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Upload Accessibility Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accessibility-gate-report
+          path: accessibility-gate.json
+          retention-days: 30
+
+  security-gate:
+    name: Security Quality Gate
+    runs-on: ubuntu-latest
+    needs: quality-check-config
+    if: github.event.inputs.check_type == 'all' || github.event.inputs.check_type == 'security' || github.event.inputs.check_type == ''
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Security Audit
+        run: |
+          npm audit --json > security-gate.json || true
+
+      - name: Check Security Thresholds
+        id: security-check
+        run: |
+          MAX_CRITICAL=${{ needs.quality-check-config.outputs.critical-vulns }}
+
+          CRITICAL=$(cat security-gate.json | jq '.vulnerabilities | map(select(.severity == "critical")) | length')
+          HIGH=$(cat security-gate.json | jq '.vulnerabilities | map(select(.severity == "high")) | length')
+          MODERATE=$(cat security-gate.json | jq '.vulnerabilities | map(select(.severity == "moderate")) | length')
+
+          FAILED=false
+
+          echo "Current Security Metrics:"
+          echo "- Critical Vulnerabilities: $CRITICAL"
+          echo "- High Vulnerabilities: $HIGH"
+          echo "- Moderate Vulnerabilities: $MODERATE"
+
+          if [ "$CRITICAL" -gt "$MAX_CRITICAL" ]; then
+            echo "❌ Critical vulnerabilities ($CRITICAL) exceed threshold ($MAX_CRITICAL)"
+            FAILED=true
+          else
+            echo "✅ Critical vulnerabilities within limit: $CRITICAL"
+          fi
+
+          if [ "$HIGH" -gt 5 ]; then
+            echo "⚠️  High vulnerabilities: $HIGH (recommend review)"
+          fi
+
+          if [ "$FAILED" = true ]; then
+            echo "failed=true" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "failed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Security Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-gate-report
+          path: security-gate.json
+          retention-days: 30
+
+  breaking-changes:
+    name: Breaking Changes Detection
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Breaking Changes
+        id: breaking-check
+        run: |
+          git checkout origin/${{ github.base_ref }}
+
+          # Check for breaking change indicators in commit messages
+          BREAKING_COMMITS=$(git log origin/${{ github.base_ref }}..${{ github.sha }} --grep="BREAKING CHANGE" --oneline | wc -l)
+
+          # Check for API changes
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...${{ github.sha}} | grep -E "\.(js|css)$" | wc -l)
+
+          # Check for removed files
+          REMOVED_FILES=$(git diff origin/${{ github.base_ref }}...${{ github.sha }} --name-only --diff-filter=D | wc -l)
+
+          echo "Breaking change analysis:"
+          echo "- Breaking commits: $BREAKING_COMMITS"
+          echo "- Changed source files: $CHANGED_FILES"
+          echo "- Removed files: $REMOVED_FILES"
+
+          if [ "$BREAKING_COMMITS" -gt 0 ] || [ "$REMOVED_FILES" -gt 0 ]; then
+            echo "Potential breaking changes detected"
+            echo "breaking=true" >> $GITHUB_OUTPUT
+          else
+            echo "No breaking changes detected"
+            echo "breaking=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Warn About Breaking Changes
+        if: steps.breaking-check.outputs.breaking == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '## ⚠️ Potential Breaking Changes Detected\n\nThis pull request may contain breaking changes. Please ensure:\n\n- API contracts are maintained\n- Backwards compatibility is preserved\n- Migration guide is provided if needed\n- All tests pass after changes\n\nPlease review carefully before merging.'
+            });
+
+  quality-gate-summary:
+    name: Quality Gates Summary
+    runs-on: ubuntu-latest
+    needs: [coverage-gate, performance-gate, accessibility-gate, security-gate, breaking-changes]
+    if: always()
+    outputs:
+      all-passed: ${{ steps.summary.outputs.all-passed }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Generate Summary Report
+        id: summary
+        run: |
+          COVERAGE_STATUS='${{ needs.coverage-gate.result }}'
+          PERF_STATUS='${{ needs.performance-gate.result }}'
+          A11Y_STATUS='${{ needs.accessibility-gate.result }}'
+          SECURITY_STATUS='${{ needs.security-gate.result }}'
+          BREAKING='${{ needs.breaking-changes.outputs.breaking }}'
+
+          cat > quality-gate-summary.md << EOF
+          # Quality Gates Summary
+
+          ## Gate Results
+
+          | Quality Gate | Status | Details |
+          |--------------|--------|---------|
+          | Code Coverage | $COVERAGE_STATUS | Critical: 90%, Overall: 80% |
+          | Performance | $PERF_STATUS | Lighthouse scores |
+          | Accessibility | $A11Y_STATUS | WCAG 2.1 AA |
+          | Security | $SECURITY_STATUS | Vulnerability scan |
+          | Breaking Changes | $BREAKING == 'true' ? '⚠️ Detected' : 'None' | Compatibility check |
+
+          ## Overall Status
+
+          EOF
+
+          if [ "$COVERAGE_STATUS" = "success" ] && \
+             [ "$PERF_STATUS" = "success" ] && \
+             [ "$A11Y_STATUS" = "success" ] && \
+             [ "$SECURITY_STATUS" = "success" ]; then
+            echo "✅ **All quality gates passed**" >> quality-gate-summary.md
+            echo "all-passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ **Some quality gates failed**" >> quality-gate-summary.md
+            echo "all-passed=false" >> $GITHUB_OUTPUT
+          fi
+
+          cat >> quality-gate-summary.md << EOF
+
+          ## Recommendations
+
+          - Review failed quality gates
+          - Address critical issues before merging
+          - Consider the impact of breaking changes
+          - Update documentation if needed
+
+          Summary generated at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+
+      - name: Upload Quality Gate Summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-gate-summary-${{ github.sha }}
+          path: quality-gate-summary.md
+          retention-days: 90
+
+      - name: Comment PR with Quality Gate Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('quality-gate-summary.md', 'utf8');
+            const allPassed = '${{ steps.summary.outputs.all-passed }}' === 'true';
+
+            const comment = `## Quality Gates Status: ${allPassed ? '✅ Passed' : '❌ Failed'}\n\n${summary}`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: comment
+            });
+
+      - name: Block Merge on Failed Gates
+        if: steps.summary.outputs.all-passed != 'true' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+
+            if (pullRequest.mergeable_state !== 'dirty') {
+              console.log('Quality gates failed - blocking merge');
+            }

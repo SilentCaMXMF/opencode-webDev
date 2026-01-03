@@ -1,0 +1,95 @@
+{
+  "devices": [
+    {
+      "name": "Desktop (1920x1080)",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "deviceScaleFactor": 1,
+      "isMobile": false,
+      "hasTouch": false,
+      "priority": "high"
+    },
+    {
+      "name": "Desktop (1366x768)",
+      "viewport": {
+        "width": 1366,
+        "height": 768
+      },
+      "deviceScaleFactor": 1,
+      "isMobile": false,
+      "hasTouch": false,
+      "priority": "high"
+    },
+    {
+      "name": "Laptop (1280x720)",
+      "viewport": {
+        "width": 1280,
+        "height": 720
+      },
+      "deviceScaleFactor": 1,
+      "isMobile": false,
+      "hasTouch": false,
+      "priority": "high"
+    },
+    {
+      "name": "Tablet (768x1024)",
+      "viewport": {
+        "width": 768,
+        "height": 1024
+      },
+      "deviceScaleFactor": 2,
+      "isMobile": true,
+      "hasTouch": true,
+      "priority": "medium"
+    },
+    {
+      "name": "Mobile Large (414x896)",
+      "viewport": {
+        "width": 414,
+        "height": 896
+      },
+      "deviceScaleFactor": 3,
+      "isMobile": true,
+      "hasTouch": true,
+      "priority": "high"
+    },
+    {
+      "name": "Mobile Medium (375x667)",
+      "viewport": {
+        "width": 375,
+        "height": 667
+      },
+      "deviceScaleFactor": 2,
+      "isMobile": true,
+      "hasTouch": true,
+      "priority": "high"
+    },
+    {
+      "name": "Mobile Small (320x568)",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "deviceScaleFactor": 2,
+      "isMobile": true,
+      "hasTouch": true,
+      "priority": "medium"
+    }
+  ],
+  "testMatrix": {
+    "desktop": ["Desktop (1920x1080)", "Desktop (1366x768)", "Laptop (1280x720)"],
+    "tablet": ["Tablet (768x1024)"],
+    "mobile": ["Mobile Large (414x896)", "Mobile Medium (375x667)", "Mobile Small (320x568)"],
+    "responsive": ["Desktop (1920x1080)", "Laptop (1280x720)", "Tablet (768x1024)", "Mobile Medium (375x667)"]
+  },
+  "breakpoints": {
+    "xs": 320,
+    "sm": 576,
+    "md": 768,
+    "lg": 992,
+    "xl": 1200,
+    "xxl": 1400
+  }
+}

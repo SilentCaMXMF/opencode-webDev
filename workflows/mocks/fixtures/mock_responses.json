@@ -1,0 +1,83 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/projects",
+    "status": 200,
+    "body": [
+      {
+        "id": 1,
+        "title": "Portfolio Website",
+        "description": "Personal portfolio website",
+        "tags": ["html", "css", "javascript"],
+        "status": "completed"
+      },
+      {
+        "id": 2,
+        "title": "React Todo App",
+        "description": "Modern todo application",
+        "tags": ["react", "typescript"],
+        "status": "in-progress"
+      }
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/projects",
+    "status": 201,
+    "body": {
+      "success": true,
+      "message": "Project created successfully",
+      "project": {
+        "id": 3,
+        "title": "New Project",
+        "description": "New project description"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/skills",
+    "status": 200,
+    "body": [
+      {
+        "id": 1,
+        "name": "JavaScript",
+        "level": "intermediate",
+        "category": "frontend"
+      },
+      {
+        "id": 2,
+        "name": "CSS",
+        "level": "intermediate",
+        "category": "frontend"
+      },
+      {
+        "id": 3,
+        "name": "React",
+        "level": "learning",
+        "category": "frontend"
+      }
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/experience",
+    "status": 200,
+    "body": [
+      {
+        "id": 1,
+        "title": "Quality and Regulatory Compliance Office",
+        "company": "INSA",
+        "period": "2025 - Present",
+        "description": "Ensuring compliance with quality standards"
+      },
+      {
+        "id": 2,
+        "title": "Waste Disposal Coordinator",
+        "company": "Freguesia de Arroios",
+        "period": "2020 - 2025",
+        "description": "Managed waste disposal operations"
+      }
+    ]
+  }
+]

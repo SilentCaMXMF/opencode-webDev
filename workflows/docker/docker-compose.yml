@@ -1,0 +1,166 @@
+version: '3.8'
+
+services:
+  # Test Application Server
+  app:
+    build:
+      context: ..
+      dockerfile: ./.opencode/workflows/docker/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=test
+      - CI=true
+    volumes:
+      - ../:/app
+      - /app/node_modules
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Mock API Server
+  mock-server:
+    build:
+      context: ..
+      dockerfile: ./.opencode/workflows/docker/Dockerfile.mock
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../tests/mocks:/app/mocks
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Selenium Grid Hub
+  selenium-hub:
+    image: selenium/hub:4.16.0
+    container_name: selenium-hub
+    ports:
+      - "4444:4444"
+    networks:
+      - test-network
+
+  # Chrome Node
+  chrome:
+    image: selenium/node-chrome:4.16.0
+    container_name: chrome-node
+    depends_on:
+      - selenium-hub
+    environment:
+      - SE_EVENT_BUS_HOST=selenium-hub
+      - SE_EVENT_BUS_PUBLISH_PORT=4442
+      - SE_EVENT_BUS_SUBSCRIBE_PORT=4443
+      - SE_NODE_MAX_SESSIONS=3
+    ports:
+      - "5900:5900"  # VNC
+    networks:
+      - test-network
+
+  # Firefox Node
+  firefox:
+    image: selenium/node-firefox:4.16.0
+    container_name: firefox-node
+    depends_on:
+      - selenium-hub
+    environment:
+      - SE_EVENT_BUS_HOST=selenium-hub
+      - SE_EVENT_BUS_PUBLISH_PORT=4442
+      - SE_EVENT_BUS_SUBSCRIBE_PORT=4443
+      - SE_NODE_MAX_SESSIONS=3
+    ports:
+      - "5901:5900"  # VNC
+    networks:
+      - test-network
+
+  # Playwright Service
+  playwright:
+    build:
+      context: ..
+      dockerfile: ./.opencode/workflows/docker/Dockerfile.playwright
+    depends_on:
+      - app
+    volumes:
+      - ../:/app
+      - /app/node_modules
+      - playwright-report:/app/playwright-report
+      - test-results:/app/test-results
+    networks:
+      - test-network
+    command: npx playwright test
+
+  # Cypress Service
+  cypress:
+    build:
+      context: ..
+      dockerfile: ./.opencode/workflows/docker/Dockerfile.cypress
+    depends_on:
+      - app
+    volumes:
+      - ../:/app
+      - /app/node_modules
+      - cypress-videos:/app/cypress/videos
+      - cypress-screenshots:/app/cypress/screenshots
+    networks:
+      - test-network
+    command: npx cypress run
+    environment:
+      - CYPRESS_baseUrl=http://app:3000
+
+  # Lighthouse Service
+  lighthouse:
+    build:
+      context: ..
+      dockerfile: ./.opencode/workflows/docker/Dockerfile.lighthouse
+    depends_on:
+      - app
+    volumes:
+      - ../:/app
+      - lighthouse-reports:/app/reports/lighthouse
+    networks:
+      - test-network
+    command: |
+      sh -c "sleep 20 && \
+      lighthouse http://app:3000 \
+      --output html \
+      --output json \
+      --output-path /app/reports/lighthouse/report \
+      --chrome-flags='--headless' \
+      --quiet"
+
+  # Pa11y Service
+  pa11y:
+    build:
+      context: ..
+      dockerfile: ./.opencode/workflows/docker/Dockerfile.pa11y
+    depends_on:
+      - app
+    volumes:
+      - ../:/app
+      - pa11y-reports:/app/reports/accessibility
+    networks:
+      - test-network
+    command: |
+      sh -c "sleep 20 && \
+      pa11y http://app:3000 \
+      --json > /app/reports/accessibility/pa11y-report.json"
+
+networks:
+  test-network:
+    driver: bridge
+
+volumes:
+  playwright-report:
+  test-results:
+  cypress-videos:
+  cypress-screenshots:
+  lighthouse-reports:
+  pa11y-reports:

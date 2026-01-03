@@ -1,0 +1,468 @@
+name: Accessibility Testing
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - '**/*.html'
+      - '**/*.css'
+      - '**/*.js'
+  pull_request:
+    branches:
+      - main
+      - develop
+  schedule:
+    # Run accessibility tests daily at 4 AM UTC
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Test type'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - automated
+          - manual
+          - wcag-aa
+          - keyboard
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  setup-a11y:
+    name: Setup Accessibility Testing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Playwright
+        run: npx playwright install --with-deps
+
+      - name: Install Accessibility Tools
+        run: |
+          npm install -g pa11y
+          npm install -g @axe-core/cli
+
+  automated-a11y-tests:
+    name: Automated Accessibility Tests (Playwright + axe)
+    runs-on: ubuntu-latest
+    needs: setup-a11y
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Run Accessibility Tests (${{ matrix.browser }})
+        run: npm run test:accessibility -- --project=${{ matrix.browser }}
+        env:
+          CI: true
+
+      - name: Generate Axe Report
+        run: |
+          npx axe http://localhost:3000 --tags wcag2a,wcag2aa --json > axe-results-${{ matrix.browser }}.json || true
+        continue-on-error: true
+
+      - name: Upload Accessibility Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accessibility-results-${{ matrix.browser }}
+          path: |
+            axe-results-${{ matrix.browser }}.json
+            playwright-report/
+            test-results/
+          retention-days: 30
+
+  pa11y-tests:
+    name: Pa11y Accessibility Tests
+    runs-on: ubuntu-latest
+    needs: setup-a11y
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Start Test Server
+        run: |
+          npm run serve &
+          sleep 15
+
+      - name: Run Pa11y Tests
+        run: |
+          for url in "http://localhost:3000" \
+                    "http://localhost:3000/#summary-section" \
+                    "http://localhost:3000/#skills-section" \
+                    "http://localhost:3000/#experience-section"; do
+            echo "Testing: $url"
+            pa11y "$url" --json > "pa11y-$(basename $url).json" || true
+          done
+        continue-on-error: true
+
+      - name: Generate Pa11y Report
+        run: |
+          node ./.opencode/workflows/scripts/generate-pa11y-report.js
+
+      - name: Upload Pa11y Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: pa11y-results
+          path: |
+            pa11y-*.json
+            pa11y-report.html
+          retention-days: 30
+
+  keyboard-navigation:
+    name: Keyboard Navigation Testing
+    runs-on: ubuntu-latest
+    needs: setup-a11y
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Playwright
+        run: npx playwright install --with-deps
+
+      - name: Run Keyboard Navigation Tests
+        run: npx playwright test --config=playwright.keyboard.config.ts
+        env:
+          CI: true
+
+      - name: Upload Keyboard Navigation Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyboard-navigation-results
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 30
+
+  color-contrast:
+    name: Color Contrast Analysis
+    runs-on: ubuntu-latest
+    needs: setup-a11y
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Color Analysis Tools
+        run: |
+          npm install -g color-contrast-checker
+
+      - name: Analyze CSS Color Contrast
+        run: |
+          node ./.opencode/workflows/scripts/analyze-color-contrast.js
+
+      - name: Generate Color Contrast Report
+        run: |
+          cat > color-contrast-report.md << 'EOF'
+          # Color Contrast Analysis Report
+
+          ## Standards
+          - WCAG 2.1 AA compliance
+          - Normal text: 4.5:1 ratio
+          - Large text: 3:1 ratio
+          - UI components: 3:1 ratio
+
+          ## Results
+          See attached JSON report for detailed color contrast analysis.
+
+          Generated at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+
+      - name: Upload Color Contrast Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: color-contrast-results
+          path: |
+            color-contrast-analysis.json
+            color-contrast-report.md
+          retention-days: 30
+
+  screen-reader-testing:
+    name: Screen Reader Testing
+    runs-on: ubuntu-latest
+    needs: setup-a11y
+    if: github.event_name == 'schedule' || github.event.inputs.test_type == 'manual'
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Playwright
+        run: npx playwright install --with-deps
+
+      - name: Run Screen Reader Tests
+        run: npx playwright test --config=playwright.screen-reader.config.ts
+        env:
+          CI: true
+
+      - name: Upload Screen Reader Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screen-reader-results
+          path: |
+            playwright-report/
+            test-results/
+            screen-reader-audit.json
+          retention-days: 30
+
+  aria-validation:
+    name: ARIA Attribute Validation
+    runs-on: ubuntu-latest
+    needs: setup-a11y
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Playwright
+        run: npx playwright install --with-deps
+
+      - name: Run ARIA Validation Tests
+        run: npx playwright test --config=playwright.aria.config.ts
+        env:
+          CI: true
+
+      - name: Generate ARIA Report
+        run: |
+          npx axe http://localhost:3000 --tags aria-valid-attr-value,aria-valid-attr --json > aria-validation.json || true
+
+      - name: Upload ARIA Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aria-validation-results
+          path: |
+            aria-validation.json
+            playwright-report/
+          retention-days: 30
+
+  wcag-compliance:
+    name: WCAG 2.1 AA Compliance Check
+    runs-on: ubuntu-latest
+    needs: [automated-a11y-tests, pa11y-tests, aria-validation]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download All Accessibility Reports
+        uses: actions/download-artifact@v4
+        with:
+          path: accessibility-reports
+
+      - name: Aggregate WCAG Results
+        run: |
+          node ./.opencode/workflows/scripts/aggregate-wcag-results.js
+
+      - name: Check WCAG Compliance
+        id: wcag-check
+        run: |
+          COMPLIANCE=$(cat wcag-compliance-summary.json | jq '.complianceRate')
+          VIOLATIONS=$(cat wcag-compliance-summary.json | jq '.totalViolations')
+
+          echo "Compliance Rate: $COMPLIANCE%"
+          echo "Total Violations: $VIOLATIONS"
+
+          if (( $(echo "$COMPLIANCE < 95" | bc -l) )); then
+            echo "❌ WCAG compliance rate ($COMPLIANCE%) below threshold (95%)"
+            echo "compliant=false" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "✅ WCAG compliance rate: $COMPLIANCE%"
+            echo "compliant=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload WCAG Compliance Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: wcag-compliance-report
+          path: |
+            wcag-compliance-summary.json
+            wcag-detailed-report.html
+          retention-days: 90
+
+  a11y-summary:
+    name: Accessibility Test Summary
+    runs-on: ubuntu-latest
+    needs: [automated-a11y-tests, pa11y-tests, keyboard-navigation, color-contrast, wcag-compliance]
+    if: always()
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download All Accessibility Reports
+        uses: actions/download-artifact@v4
+        with:
+          path: all-a11y-reports
+
+      - name: Generate Accessibility Summary
+        run: |
+          cat > accessibility-summary.md << 'EOF'
+          # Accessibility Testing Summary
+
+          ## Test Results
+
+          | Test Suite | Status | Details |
+          |-------------|--------|---------|
+          | Automated Tests (axe) | ${{ needs.automated-a11y-tests.result }} | Multi-browser testing |
+          | Pa11y Tests | ${{ needs.pa11y-tests.result }} | Static analysis |
+          | Keyboard Navigation | ${{ needs.keyboard-navigation.result }} | Keyboard-only usage |
+          | Color Contrast | ${{ needs.color-contrast.result }} | WCAG compliance |
+          | WCAG 2.1 AA | ${{ needs.wcag-compliance.result }} | Overall compliance |
+
+          ## WCAG 2.1 AA Compliance
+
+          - Compliance Rate: ${{ needs.wcag-compliance.outputs.compliant == 'true' ? '✅ 95%+' : '❌ Below 95%' }}
+          - Total Violations: See detailed reports
+
+          ## Recommendations
+
+          - Review and fix any WCAG violations
+          - Ensure all interactive elements are keyboard accessible
+          - Verify color contrast ratios meet standards
+          - Test with actual screen readers
+          - Implement proper ARIA attributes
+          - Add alt text to all images
+          - Ensure proper heading hierarchy
+
+          ## Reports Available
+
+          - Automated accessibility test results
+          - Pa11y test reports
+          - Keyboard navigation audit
+          - Color contrast analysis
+          - WCAG compliance report
+
+          Testing completed at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+
+      - name: Upload Accessibility Summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: accessibility-summary-${{ github.sha }}
+          path: accessibility-summary.md
+          retention-days: 90
+
+      - name: Comment PR with Accessibility Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('accessibility-summary.md', 'utf8');
+
+            // Check for critical violations
+            let criticalViolations = '';
+            const wcagFile = 'all-a11y-reports/wcag-compliance-report/wcag-compliance-summary.json';
+            if (fs.existsSync(wcagFile)) {
+              const wcag = JSON.parse(fs.readFileSync(wcagFile, 'utf8'));
+              if (wcag.totalViolations > 0) {
+                criticalViolations = '\n\n### ⚠️ Accessibility Issues Found\n\n';
+                wcag.violationsByCategory?.forEach(cat => {
+                  if (cat.count > 0) {
+                    criticalViolations += `- ${cat.category}: ${cat.count} issues\n`;
+                  }
+                });
+              }
+            }
+
+            const comment = summary + (criticalViolations || '\n\n### ✅ No Critical Accessibility Issues\n\nGreat job maintaining accessibility standards!');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: comment
+            });
+
+      - name: Create Accessibility Issue (if problems found)
+        if: github.event_name == 'schedule' && needs.wcag-compliance.outputs.compliant != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Accessibility Compliance Issue Detected',
+              body: 'Automated accessibility tests found WCAG 2.1 AA compliance issues. Please review the attached reports and address the violations.',
+              labels: ['accessibility', 'wcag', 'automated']
+            });

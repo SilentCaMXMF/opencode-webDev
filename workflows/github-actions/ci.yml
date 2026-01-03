@@ -1,0 +1,512 @@
+name: Frontend Design Agent System - CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'feature/**'
+      - 'fix/**'
+  pull_request:
+    branches:
+      - main
+      - develop
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      test_suite:
+        description: 'Test suite to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - unit
+          - integration
+          - e2e
+          - visual
+          - accessibility
+          - performance
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: '20.x'
+  PNPM_VERSION: '8.x'
+
+jobs:
+  setup:
+    name: Setup & Cache Dependencies
+    runs-on: ubuntu-latest
+    outputs:
+      cache-key: ${{ steps.cache-keys.outputs.cache-key }}
+      test-changed: ${{ steps.changed-files.outputs.tests_any_modified }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Generate Cache Keys
+        id: cache-keys
+        run: |
+          echo "cache-key=node-modules-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}" >> $GITHUB_OUTPUT
+
+      - name: Check for Test Changes
+        id: changed-files
+        uses: tj-actions/changed-files@v42
+        with:
+          files: |
+            **/*.test.{js,ts}
+            **/*.spec.{js,ts}
+            tests/**/*
+            cypress/**/*
+            playwright/**/*
+            vitest/**/*
+
+  lint:
+    name: Lint & Format Check
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+        continue-on-error: false
+
+      - name: Run Prettier Check
+        run: npm run format:check
+        continue-on-error: false
+
+      - name: Upload Lint Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-results
+          path: |
+            eslint-report.json
+            prettier-report.json
+          retention-days: 7
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Unit Tests (Shard ${{ matrix.shard }})
+        run: npm run test -- --shard=${{ matrix.shard }}/4 --coverage
+
+      - name: Upload Coverage Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-shard-${{ matrix.shard }}
+          path: coverage/
+          retention-days: 7
+
+      - name: Comment PR with Coverage
+        if: github.event_name == 'pull_request'
+        uses: romeovs/lcov-reporter-action@v0.3.1
+        with:
+          lcov-file: ./coverage/lcov.info
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: setup
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Run Integration Tests (${{ matrix.browser }})
+        run: npm run test:integration -- --project=${{ matrix.browser }}
+        env:
+          CI: true
+
+      - name: Upload Playwright Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.browser }}
+          path: playwright-report/
+          retention-days: 7
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.browser }}
+          path: test-results/
+          retention-days: 7
+
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: setup
+    timeout-minutes: 45
+    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[e2e]')
+    strategy:
+      fail-fast: false
+      matrix:
+        container: [1, 2, 3]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run E2E Tests (Container ${{ matrix.container }})
+        uses: cypress-io/github-action@v6
+        with:
+          start: npm run serve
+          wait-on: 'http://localhost:3000'
+          wait-on-timeout: 120
+          browser: chrome
+          config: integrationFolder=cypress/e2e/spec-${{ matrix.container }}
+          record: true
+          parallel: true
+          group: 'E2E Tests - Container ${{ matrix.container }}'
+        env:
+          CYPRESS_RECORD_KEY: ${{ secrets.CYPRESS_RECORD_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CYPRESS_CI: true
+
+      - name: Upload Cypress Screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-screenshots-${{ matrix.container }}
+          path: cypress/screenshots
+          retention-days: 7
+
+      - name: Upload Cypress Videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-videos-${{ matrix.container }}
+          path: cypress/videos
+          retention-days: 7
+
+  visual-tests:
+    name: Visual Regression Tests
+    runs-on: ubuntu-latest
+    needs: setup
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+
+      - name: Run Visual Tests
+        run: npm run test:visual
+        env:
+          CI: true
+
+      - name: Upload Visual Regression Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression-report
+          path: playwright-report/
+          retention-days: 7
+
+  accessibility-tests:
+    name: Accessibility Tests
+    runs-on: ubuntu-latest
+    needs: setup
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+
+      - name: Start Test Server
+        run: |
+          npm run serve &
+          sleep 10
+
+      - name: Run Accessibility Tests
+        run: npm run test:accessibility
+        continue-on-error: false
+
+      - name: Upload Accessibility Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accessibility-report
+          path: reports/accessibility/
+          retention-days: 30
+
+      - name: Comment Accessibility Issues
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = 'reports/accessibility/report.json';
+            if (fs.existsSync(reportPath)) {
+              const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+              const violations = report.violations || [];
+              if (violations.length > 0) {
+                const body = violations.map(v => `**${v.id}**: ${v.description} (${v.impact})`).join('\n');
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: `### Accessibility Issues Found\\n\\n${body}`
+                });
+              }
+            }
+
+  coverage-aggregation:
+    name: Aggregate Coverage
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    if: always()
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Coverage Reports
+        uses: actions/download-artifact@v4
+        with:
+          path: coverage-reports
+          pattern: coverage-report-shard-*
+
+      - name: Merge Coverage Reports
+        run: |
+          mkdir -p coverage
+          find coverage-reports -name "coverage-final.json" -exec cat {} \; > coverage/merged-coverage.json
+
+      - name: Check Coverage Thresholds
+        run: |
+          npm install -g @cfaester/enzyme-adapter-react-18
+          node scripts/check-coverage.js
+        continue-on-error: false
+
+      - name: Upload Combined Coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: combined-coverage-report
+          path: coverage/
+          retention-days: 30
+
+  quality-gates:
+    name: Quality Gates Check
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests, integration-tests]
+    if: always()
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+
+      - name: Evaluate Quality Gates
+        run: |
+          npm run test:quality-gates
+        env:
+          ARTIFACTS_PATH: all-artifacts
+
+      - name: Check Quality Gate Results
+        id: quality-check
+        run: |
+          if [ -f "quality-gate-status.json" ]; then
+            STATUS=$(cat quality-gate-status.json | jq -r '.status')
+            echo "status=$STATUS" >> $GITHUB_OUTPUT
+            if [ "$STATUS" != "pass" ]; then
+              exit 1
+            fi
+          fi
+
+      - name: Comment Quality Gate Results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (fs.existsSync('quality-gate-report.md')) {
+              const report = fs.readFileSync('quality-gate-report.md', 'utf8');
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: report
+              });
+            }
+
+  test-summary:
+    name: Test Results Summary
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, e2e-tests, visual-tests, accessibility-tests, quality-gates]
+    if: always()
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download All Test Results
+        uses: actions/download-artifact@v4
+        with:
+          path: test-results
+
+      - name: Generate Test Summary
+        run: |
+          npm run generate:test-summary
+        env:
+          RESULTS_PATH: test-results
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: |
+            test-results/**/*.xml
+            test-results/**/*.json
+          check_name: Test Results
+          comment_mode: off
+
+      - name: Upload Test Summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-summary
+          path: test-summary-report.md
+          retention-days: 30
+
+  notify:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [test-summary]
+    if: always() && github.event_name == 'push'
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Test Summary
+        uses: actions/download-artifact@v4
+        with:
+          name: test-summary
+
+      - name: Send Slack Notification
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "CI Pipeline Failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Frontend Design Agent System CI Pipeline Failed*\\n\\nRepository: ${{ github.repository }}\\nBranch: ${{ github.ref_name }}\\nCommit: ${{ github.sha }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Send Email Notification
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "CI Pipeline Failed - ${{ github.repository }}"
+          body: |
+            The CI pipeline failed for repository ${{ github.repository }}.
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            Actor: ${{ github.actor }}
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: CI/CD Pipeline <ci@github-actions.com>

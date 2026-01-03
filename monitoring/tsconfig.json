@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "outDir": "./dist",
+    "rootDir": "./",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "@types/*": ["types/*"],
+      "@collector/*": ["collector/src/*"],
+      "@alerting/*": ["alerting/src/*"],
+      "@integration/*": ["integration/*"],
+      "@database/*": ["database/*"]
+    }
+  },
+  "include": [
+    "collector/**/*",
+    "alerting/**/*",
+    "integration/**/*",
+    "database/**/*",
+    "types/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dashboard",
+    "**/*.test.ts",
+    "**/*.spec.ts"
+  ]
+}
