@@ -1,0 +1,103 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "opencode": {
+      "npm": "@ai-sdk/anthropic",
+      "name": "OpenCode Zen",
+      "options": {
+        "baseURL": "https://opencode.ai/zen/v1"
+      },
+      "models": {
+        "opencode/big-pickle": {
+          "name": "Big Pickle (Zen)-Free"
+        },
+        "opencode/glm-4.7-free": {
+          "name": "glm-4.7 (Zen)-free"
+        },
+        "opencode/kimi-k2.5-free": {
+          "name": "kimi-k2.5-free"
+        },
+        "opencode/minimax-m2.1-free": {
+          "name": "minimax-m2.1-free (Zen)"
+        },
+        "opencode/trinity-large-preview-free": {
+          "name": "trinity-large-preview-free"
+        }
+      }
+    }
+  },
+  "model": "opencode/big-pickle",
+  "tools": {
+    "write": true,
+    "bash": true,
+    "task": true,
+    "patch": true
+  },
+  "mcp": {
+    "exa": {
+      "type": "remote",
+      "url": "https://mcp.exa.ai/mcp",
+      "enabled": true
+    },
+    "morph": {
+      "type": "local",
+      "command": ["bunx", "@morphllm/morphmcp"],
+      "enabled": true,
+      "environment": {
+        "ENABLED_TOOLS": "warp_grep"
+      }
+    },
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true,
+      "headers": {
+        "CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}"
+      }
+    },
+    "github": {
+      "type": "remote",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "enabled": true,
+      "headers": {
+        "GITHUB_CLIENT_ID": "{env:GITHUB_CLIENT_ID}",
+        "GITHUB_CLIENT_SECRET": "{env:GITHUB_CLIENT_SECRET}"
+      }
+    },
+    "devtools": {
+      "type": "local",
+      "command": ["npx", "-y", "chrome-devtools-mcp@latest", "--headless=true", "--isolated=true", "--viewport=1920x1080", "--channel=stable", "--categoryEmulation=true", "--categoryPerformance=true", "--categoryNetwork=true"],
+      "environment": {
+        "NODE_ENV": "production",
+        "DEBUG": "chrome-devtools-mcp:*"
+      }
+    }
+  },
+  "agent": {
+    "build": {
+      "tools": {
+        "github*": true,
+        "write": true,
+        "bash": true,
+        "task": true,
+        "patch": true,
+        "context7": true,
+        "devtools": true
+      }
+    },
+    "plan": {
+      "tools": {
+        "github*": true,
+        "write": false,
+        "bash": false,
+        "task": false,
+        "patch": false,
+        "context7": true,
+        "devtools": true
+      }
+    }
+  },
+  "plugin": [
+    "@howaboua/opencode-roadmap-plugin@latest"
+  ]
+}
