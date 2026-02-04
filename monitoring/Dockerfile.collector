@@ -1,0 +1,50 @@
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY tsconfig.json ./
+
+# Install dependencies
+RUN npm ci --production
+
+# Copy source files
+COPY collector/src ./collector/src
+COPY alerting/src ./alerting/src
+COPY types ./types
+COPY integration ./integration
+
+# Build TypeScript (no actual build step needed for ts-node)
+# Just copy the files
+
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy dependencies from builder
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/tsconfig.json ./
+
+# Copy source files
+COPY --from=builder /app/collector ./collector
+COPY --from=builder /app/alerting ./alerting
+COPY --from=builder /app/types ./types
+COPY --from=builder /app/integration ./integration
+
+# Install TypeScript runtime
+RUN npm install -g ts-node
+
+# Create non-root user
+RUN addgroup -g 1001 -S monitoring && \
+    adduser -S monitoring -u 1001
+
+# Change ownership
+RUN chown -R monitoring:monitoring /app
+
+USER monitoring
+
+EXPOSE 3000
+
+CMD ["ts-node", "collector/src/index.ts"]

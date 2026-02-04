@@ -1,0 +1,535 @@
+name: Frontend Design Agent System - CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      version:
+        description: 'Version tag (leave empty for auto)'
+        required: false
+        default: ''
+      skip_tests:
+        description: 'Skip tests (not recommended)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  deployments: write
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  pre-deploy-checks:
+    name: Pre-Deployment Checks
+    runs-on: ubuntu-latest
+    outputs:
+      can-deploy: ${{ steps.check.outputs.can-deploy }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Deployment Eligibility
+        id: check
+        run: |
+          # Check if all quality gates pass
+          if [ "${{ github.event.inputs.skip_tests }}" != "true" ]; then
+            echo "Running pre-deployment tests..."
+          fi
+
+          # Check branch protection
+          if [ "${{ github.ref_name }}" != "main" ] && [ "${{ github.event_name }}" == "push" ]; then
+            echo "Cannot deploy from non-main branch"
+            echo "can-deploy=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          echo "can-deploy=true" >> $GITHUB_OUTPUT
+
+      - name: Generate Version Tag
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=$(date +%Y.%m.%d)-$(git rev-parse --short HEAD)
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Generated version: $VERSION"
+
+      - name: Create Git Tag
+        if: github.event_name == 'push'
+        run: |
+          git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
+  full-test-suite:
+    name: Full Test Suite
+    runs-on: ubuntu-latest
+    needs: pre-deploy-checks
+    if: github.event.inputs.skip_tests != 'true'
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run All Tests
+        run: npm run test:all
+        env:
+          CI: true
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-test-results
+          path: |
+            coverage/
+            test-results/
+            playwright-report/
+          retention-days: 30
+
+  build:
+    name: Build Application
+    runs-on: ubuntu-latest
+    needs: [pre-deploy-checks, full-test-suite]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Build
+        run: npm run build
+
+      - name: Generate Build Info
+        run: |
+          cat > build-info.json << EOF
+          {
+            "version": "${{ needs.pre-deploy-checks.outputs.version }}",
+            "commit": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "author": "${{ github.actor }}"
+          }
+          EOF
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts-${{ needs.pre-deploy-checks.outputs.version }}
+          path: |
+            dist/
+            build-info.json
+          retention-days: 30
+
+  security-scan:
+    name: Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts-${{ needs.pre-deploy-checks.outputs.version }}
+          path: dist/
+
+      - name: Run Security Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Upload Security Scan Results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Check Security Issues
+        run: |
+          if grep -q '"level":"CRITICAL"' trivy-results.sarif; then
+            echo "Critical security vulnerabilities found. Blocking deployment."
+            exit 1
+          fi
+          if grep -q '"level":"HIGH"' trivy-results.sarif; then
+            echo "High security vulnerabilities found. Blocking deployment."
+            exit 1
+          fi
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: ${{ steps.deployment.outputs.url }}
+    needs: [pre-deploy-checks, security-scan]
+    if: |
+      (github.event.inputs.environment == 'staging' || github.ref_name == 'main') &&
+      needs.pre-deploy-checks.outputs.can-deploy == 'true'
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts-${{ needs.pre-deploy-checks.outputs.version }}
+          path: dist/
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Staging Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist'
+
+      - name: Deploy to GitHub Pages (Staging)
+        id: deployment
+        uses: actions/deploy-pages@v4
+        with:
+          environment_url: ${{ steps.deployment.outputs.page_url }}
+
+      - name: Run Smoke Tests
+        run: |
+          npm run test:smoke
+        env:
+          BASE_URL: ${{ steps.deployment.outputs.page_url }}
+
+      - name: Create Deployment Record
+        run: |
+          cat > deployment-record-${{ needs.pre-deploy-checks.outputs.version }}.json << EOF
+          {
+            "environment": "staging",
+            "version": "${{ needs.pre-deploy-checks.outputs.version }}",
+            "url": "${{ steps.deployment.outputs.page_url }}",
+            "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "deployed_by": "${{ github.actor }}",
+            "commit": "${{ github.sha }}"
+          }
+          EOF
+
+      - name: Upload Deployment Record
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-record-staging-${{ needs.pre-deploy-checks.outputs.version }}
+          path: deployment-record-${{ needs.pre-deploy-checks.outputs.version }}.json
+          retention-days: 90
+
+      - name: Notify Staging Deployment
+        uses: slackapi/slack-github-action@v1.24.0
+        if: success()
+        with:
+          payload: |
+            {
+              "text": "Staging Deployment Successful",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Staging Deployment Successful*\\n\\nVersion: ${{ needs.pre-deploy-checks.outputs.version }}\\nURL: ${{ steps.deployment.outputs.page_url }}\\nDeployed by: ${{ github.actor }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.deployment.outputs.url }}
+    needs: [pre-deploy-checks, security-scan, deploy-staging]
+    if: |
+      (github.event.inputs.environment == 'production' || (github.event_name == 'push' && github.ref_name == 'main')) &&
+      needs.pre-deploy-checks.outputs.can-deploy == 'true'
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts-${{ needs.pre-deploy-checks.outputs.version }}
+          path: dist/
+
+      - name: Create Production Backup
+        run: |
+          mkdir -p backups
+          cp -r dist backups/backup-${{ needs.pre-deploy-checks.outputs.version }}/
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Production Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist'
+
+      - name: Deploy to GitHub Pages (Production)
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Run Production Smoke Tests
+        run: |
+          npm run test:smoke
+        env:
+          BASE_URL: ${{ steps.deployment.outputs.page_url }}
+
+      - name: Run Production Health Checks
+        run: |
+          npm run test:health
+        env:
+          BASE_URL: ${{ steps.deployment.outputs.page_url }}
+
+      - name: Create Deployment Record
+        run: |
+          cat > deployment-record-${{ needs.pre-deploy-checks.outputs.version }}.json << EOF
+          {
+            "environment": "production",
+            "version": "${{ needs.pre-deploy-checks.outputs.version }}",
+            "url": "${{ steps.deployment.outputs.page_url }}",
+            "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "deployed_by": "${{ github.actor }}",
+            "commit": "${{ github.sha }}"
+          }
+          EOF
+
+      - name: Upload Deployment Record
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-record-production-${{ needs.pre-deploy-checks.outputs.version }}
+          path: deployment-record-${{ needs.pre-deploy-checks.outputs.version }}.json
+          retention-days: 365
+
+      - name: Upload Production Backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-backup-${{ needs.pre-deploy-checks.outputs.version }}
+          path: backups/
+          retention-days: 90
+
+      - name: Notify Production Deployment
+        uses: slackapi/slack-github-action@v1.24.0
+        if: success()
+        with:
+          payload: |
+            {
+              "text": "Production Deployment Successful",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Production Deployment Successful*\\n\\nVersion: ${{ needs.pre-deploy-checks.outputs.version }}\\nURL: ${{ steps.deployment.outputs.page_url }}\\nDeployed by: ${{ github.actor }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  rollback:
+    name: Rollback Deployment
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    needs: [deploy-production]
+    if: failure()
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find Last Successful Deployment
+        id: last-deployment
+        run: |
+          # Find the last successful deployment commit
+          LAST_SUCCESS=$(git log --all --grep="Deploy to Production" --oneline -n 1 | awk '{print $1}')
+          echo "commit=$LAST_SUCCESS" >> $GITHUB_OUTPUT
+
+      - name: Rollback to Last Successful Version
+        run: |
+          git checkout ${{ steps.last-deployment.outputs.commit }}
+          echo "Rolling back to commit: ${{ steps.last-deployment.outputs.commit }}"
+
+      - name: Redeploy Previous Version
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+
+      - name: Notify Rollback
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "Production Rollback Executed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Production Rollback Executed*\\n\\nRolled back to commit: ${{ steps.last-deployment.outputs.commit }}\\nInitiated by: ${{ github.actor }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Create Rollback Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Production Rollback - Manual Review Required',
+              body: `The production deployment was automatically rolled back due to failures.\n\nRolled back to commit: ${{ steps.last-deployment.outputs.commit }}\n\nPlease review the deployment logs and address any issues before redeploying.`,
+              labels: ['production', 'rollback', 'urgent']
+            })
+
+  post-deploy-validation:
+    name: Post-Deployment Validation
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: always()
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Run Lighthouse Audit
+        uses: treosh/lighthouse-ci-action@v10
+        with:
+          urls: |
+            ${{ needs.deploy-staging.steps.deployment.outputs.page_url }}
+            ${{ needs.deploy-production.steps.deployment.outputs.page_url }}
+          uploadArtifacts: true
+          temporaryPublicStorage: true
+          budgetPath: ./.github/lighthouse-budget.json
+
+      - name: Check Lighthouse Scores
+        run: |
+          for report in lighthouse-report-*.json; do
+            PERFORMANCE=$(cat $report | jq '.categories.performance.score * 100')
+            ACCESSIBILITY=$(cat $report | jq '.categories.accessibility.score * 100')
+            BEST_PRACTICES=$(cat $report | jq '.categories.best-practices.score * 100')
+            SEO=$(cat $report | jq '.categories.seo.score * 100')
+
+            echo "Checking scores for $report..."
+            if (( $(echo "$PERFORMANCE < 90" | bc -l) )); then
+              echo "Performance score below threshold: $PERFORMANCE"
+              exit 1
+            fi
+            if (( $(echo "$ACCESSIBILITY < 95" | bc -l) )); then
+              echo "Accessibility score below threshold: $ACCESSIBILITY"
+              exit 1
+            fi
+          done
+
+      - name: Upload Validation Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-deploy-validation
+          path: |
+            .lighthouseci/
+            lighthouse-report-*.json
+          retention-days: 30
+
+  deployment-summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [pre-deploy-checks, deploy-staging, deploy-production, rollback, post-deploy-validation]
+    if: always()
+    steps:
+      - name: Generate Deployment Summary
+        run: |
+          cat > deployment-summary.md << EOF
+          # Deployment Summary
+
+          ## Deployment Information
+          - **Version**: ${{ needs.pre-deploy-checks.outputs.version }}
+          - **Environment**: ${{ github.event.inputs.environment || 'auto' }}
+          - **Commit**: ${{ github.sha }}
+          - **Deployed By**: ${{ github.actor }}
+          - **Timestamp**: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          ## Deployment Status
+          - **Pre-Deploy Checks**: ${{ needs.pre-deploy-checks.result }}
+          - **Staging Deployment**: ${{ needs.deploy-staging.result }}
+          - **Production Deployment**: ${{ needs.deploy-production.result }}
+          - **Post-Deploy Validation**: ${{ needs.post-deploy-validation.result }}
+          - **Rollback**: ${{ needs.rollback.result }}
+
+          ## Next Steps
+          - Review deployment logs
+          - Monitor application health
+          - Check error rates and performance metrics
+          - Verify user acceptance testing results
+          EOF
+
+      - name: Upload Deployment Summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-summary-${{ needs.pre-deploy-checks.outputs.version }}
+          path: deployment-summary.md
+          retention-days: 365
+
+      - name: Comment Deployment Summary
+        if: github.event_name == 'push' && github.ref_name == 'main'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('deployment-summary.md', 'utf8');
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: summary
+            });

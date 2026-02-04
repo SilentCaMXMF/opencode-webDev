@@ -1,0 +1,45 @@
+{
+  "browsers": [
+    {
+      "name": "Chrome",
+      "family": "chromium",
+      "versions": ["latest", "latest-1"],
+      "platforms": ["Windows 10", "Windows 11", "macOS 12", "macOS 13", "Linux"],
+      "priority": "high",
+      "selenium": "chrome",
+      "playwright": "chromium"
+    },
+    {
+      "name": "Firefox",
+      "family": "firefox",
+      "versions": ["latest", "latest-1", "esr"],
+      "platforms": ["Windows 10", "Windows 11", "macOS 12", "macOS 13", "Linux"],
+      "priority": "high",
+      "selenium": "firefox",
+      "playwright": "firefox"
+    },
+    {
+      "name": "Safari",
+      "family": "webkit",
+      "versions": ["latest", "latest-1"],
+      "platforms": ["macOS 12", "macOS 13", "iOS 16", "iOS 17"],
+      "priority": "medium",
+      "selenium": "safari",
+      "playwright": "webkit"
+    },
+    {
+      "name": "Edge",
+      "family": "chromium",
+      "versions": ["latest", "latest-1"],
+      "platforms": ["Windows 10", "Windows 11", "macOS 12", "macOS 13"],
+      "priority": "medium",
+      "selenium": "edge",
+      "playwright": "chromium"
+    }
+  ],
+  "testMatrix": {
+    "ci": ["chromium", "firefox", "webkit"],
+    "release": ["chromium", "firefox", "webkit", "chrome", "edge"],
+    "mobile": ["chrome-mobile", "safari-mobile"]
+  }
+}

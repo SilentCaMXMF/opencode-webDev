@@ -1,0 +1,69 @@
+{
+  "coverage": {
+    "critical": 90,
+    "overall": 80,
+    "lines": 80,
+    "functions": 80,
+    "branches": 75,
+    "statements": 80
+  },
+  "lighthouse": {
+    "performance": 90,
+    "accessibility": 95,
+    "bestPractices": 90,
+    "seo": 90,
+    "pwa": 80
+  },
+  "webVitals": {
+    "LCP": 2500,
+    "FID": 100,
+    "CLS": 0.1,
+    "FCP": 1800,
+    "TTFB": 600,
+    "INP": 200
+  },
+  "accessibility": {
+    "wcagLevel": "AA",
+    "complianceRate": 95,
+    "maxViolations": 5,
+    "criticalViolations": 0,
+    "seriousViolations": 5,
+    "moderateViolations": 10
+  },
+  "security": {
+    "criticalVulnerabilities": 0,
+    "highVulnerabilities": 5,
+    "mediumVulnerabilities": 10,
+    "lowVulnerabilities": 20,
+    "maxDependenciesAge": 730
+  },
+  "performance": {
+    "maxBundleSize": 524288,
+    "maxTotalSize": 1048576,
+    "maxJsFileSize": 262144,
+    "maxCssFileSize": 262144,
+    "maxImageFileSize": 1048576,
+    "maxRequestCount": 50,
+    "maxTotalWeight": 3145728
+  },
+  "bundleSize": {
+    "js": 512000,
+    "css": 256000,
+    "html": 50000,
+    "images": 1048576,
+    "total": 2097152
+  },
+  "loadTesting": {
+    "targetRPS": 100,
+    "maxResponseTime": 2000,
+    "maxErrorRate": 0.01,
+    "maxCPU": 80,
+    "maxMemory": 80
+  },
+  "visualRegression": {
+    "pixelDiffThreshold": 100,
+    "maxDiffPixels": 0,
+    "ignoreAntialiasing": true,
+    "ignoreColors": false
+  }
+}
