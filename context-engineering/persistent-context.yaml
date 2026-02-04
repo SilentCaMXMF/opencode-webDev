@@ -1,0 +1,150 @@
+# Persistent Context Configuration
+# Frontend Design Agent System - Context Engineering v1.0
+
+system:
+  name: "Frontend Design Agent System"
+  version: "1.0.0"
+  description: "11-agent specialized system for frontend design and development"
+  context_version: "1.0.0"
+  last_updated: "2026-02-04"
+
+agents:
+  total_count: 11
+  types:
+    - id: "ORCHESTRATOR"
+      name: "Orchestrator Agent"
+      role: "Main coordination and task distribution"
+      capabilities: ["task_delegation", "agent_coordination", "context_management"]
+      
+    - id: "DESIGN_SYSTEM"
+      name: "Design System Agent"
+      role: "Design system management and UI consistency"
+      capabilities: ["design_tokens", "component_library", "style_guides"]
+      
+    - id: "COMPONENT_DEVELOPER"
+      name: "Component Developer Agent"
+      role: "Component creation and implementation"
+      capabilities: ["react_components", "typescript", "component_testing"]
+      
+    - id: "PERFORMANCE_OPTIMIZER"
+      name: "Performance Optimizer Agent"
+      role: "Performance optimization and monitoring"
+      capabilities: ["web_vitals", "bundle_optimization", "runtime_performance"]
+      
+    - id: "ACCESSIBILITY"
+      name: "Accessibility Agent"
+      role: "A11y compliance and inclusive design"
+      capabilities: ["wcag_compliance", "screen_reader_support", "keyboard_navigation"]
+      
+    - id: "CROSS_PLATFORM"
+      name: "Cross-Platform Agent"
+      role: "Multi-platform compatibility"
+      capabilities: ["responsive_design", "mobile_optimization", "browser_compatibility"]
+      
+    - id: "TESTING_QA"
+      name: "Testing/QA Agent"
+      role: "Quality assurance and testing"
+      capabilities: ["unit_testing", "integration_testing", "e2e_testing"]
+      
+    - id: "SECURITY"
+      name: "Security Agent"
+      role: "Security scanning and vulnerability assessment"
+      capabilities: ["security_scanning", "dependency_audit", "secure_coding"]
+      
+    - id: "ANIMATION"
+      name: "Animation Agent"
+      role: "Animations and transitions"
+      capabilities: ["css_animations", "microinteractions", "motion_design"]
+      
+    - id: "I18N"
+      name: "Internationalization Agent"
+      role: "Internationalization and localization"
+      capabilities: ["translation_management", "rtl_support", "cultural_adaptation"]
+      
+    - id: "UX_RESEARCH"
+      name: "UX Research Agent"
+      role: "User experience research and validation"
+      capabilities: ["user_testing", "analytics", "ux_guidelines"]
+
+technology_stack:
+  frontend:
+    framework: "React"
+    language: "TypeScript"
+    styling: "CSS Modules"
+    testing: "Vitest + React Testing Library"
+    build_tool: "Vite"
+    
+  backend:
+    runtime: "Node.js"
+    database: "TimescaleDB"
+    monitoring: "Custom metrics collector"
+    
+  development:
+  - package_manager: "npm"
+    code_quality: "ESLint + Prettier"
+    version_control: "Git"
+    ci_cd: "GitHub Actions"
+
+quality_gates:
+  code_coverage:
+    critical: 90
+    overall: 80
+  performance:
+    agent_response_time: 500  # ms
+    handoff_latency: 200      # ms
+    context_sync_time: 100    # ms
+    task_completion_rate: 95  # %
+  security:
+    high_severity: 0
+    medium_severity: 5
+    dependency_age: 2         # years max
+
+communication_patterns:
+  handoff_protocol:
+    timeout: 5000
+    retry_attempts: 3
+    context_inclusion: true
+    
+  message_format:
+    structure: "standardized"
+    versioning: true
+    compression: false
+
+context_management:
+  cache_strategy: "LRU"
+  max_cache_size: "100MB"
+  retention_period: "30 days"
+  sync_interval: 60  # seconds
+
+active_workflows:
+  - name: "component_development"
+    stages: ["design", "development", "testing", "accessibility", "performance"]
+    
+  - name: "feature_development"
+    stages: ["research", "design", "implementation", "testing", "deployment"]
+    
+  - name: "bug_fix_workflow"
+    stages: ["identification", "analysis", "fix", "testing", "verification"]
+
+recent_decisions:
+  - "Adopted TypeScript for all new development (ADR-001)"
+  - "Implemented component-based architecture (ADR-002)"
+  - "Established Context7 orchestration layer"
+  - "Set up comprehensive monitoring system"
+
+active_context:
+  current_project: "Frontend Design Agent System"
+  active_features:
+    - "Agent coordination system"
+    - "Performance monitoring dashboard"
+    - "Context engineering framework"
+    - "Testing infrastructure"
+  
+  known_issues:
+    - "Context hit rate currently ~30% (targeting >85%)"
+    - "Agent handoff latency occasionally exceeds thresholds"
+    
+  current_focus:
+    - "Phase 1: Context engineering implementation"
+    - "Improving agent communication patterns"
+    - "Establishing pattern library"

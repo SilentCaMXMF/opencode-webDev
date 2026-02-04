@@ -1,0 +1,38 @@
+{
+  "name": "@frontend-agents/context-engineering",
+  "version": "1.0.0",
+  "description": "Context Engineering System for Frontend Design Agent System",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src/**/*.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.22.4",
+    "fuse.js": "^7.0.0",
+    "sqlite3": "^5.1.6",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "@types/uuid": "^9.0.7",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.1.0"
+  },
+  "keywords": [
+    "context-engineering",
+    "ai-agents",
+    "knowledge-management",
+    "frontend-development"
+  ],
+  "author": "Frontend Design Agent System",
+  "license": "MIT"
+}
