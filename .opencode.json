@@ -98,6 +98,6 @@
     }
   },
   "plugin": [
-    "@howaboua/opencode-roadmap-plugin@latest"
+    "@howaboua/opencode-planning-toolkit@latest"
   ]
 }

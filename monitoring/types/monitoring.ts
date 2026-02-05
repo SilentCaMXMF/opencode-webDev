@@ -39,6 +39,37 @@ export enum MetricType {
   AGENT_TOOL_USAGE = 'agent_tool_usage',
   AGENT_COORDINATION = 'agent_coordination',
 
+  // Context Engineering Metrics (ROADMAP Phase 1)
+  CONTEXT_HIT_RATE = 'context_hit_rate',
+  CONTEXT_SEARCH_LATENCY = 'context_search_latency',
+  CONTEXT_CONFIDENCE_SCORE = 'context_confidence_score',
+  CONTEXT_CORRUPTION = 'context_corruption',
+  CONTEXT_REPOSITORY_SIZE = 'context_repository_size',
+
+  // Workflow Metrics (ROADMAP Phase 1)
+  WORKFLOW_EXECUTION = 'workflow_execution',
+  WORKFLOW_STAGE_TRANSITION = 'workflow_stage_transition',
+  QUALITY_GATE_COMPLIANCE = 'quality_gate_compliance',
+  EVIDENCE_COLLECTION = 'evidence_collection',
+  WORKFLOW_DEVIATION = 'workflow_deviation',
+  HANDOFF_LATENCY = 'handoff_latency',
+  ESCALATION_RATE = 'escalation_rate',
+
+  // Provider Adapter Metrics (ROADMAP Phase 3)
+  PROVIDER_REQUESTS = 'provider_requests',
+  PROVIDER_RESPONSE_TIME = 'provider_response_time',
+  PROVIDER_ERROR_RATE = 'provider_error_rate',
+  MODEL_SELECTION = 'model_selection',
+  MODEL_MIGRATION = 'model_migration',
+  PROVIDER_AVAILABILITY = 'provider_availability',
+
+  // Evidence-Based Delivery Metrics (ROADMAP Phase 3)
+  EVIDENCE_ARTIFACTS = 'evidence_artifacts',
+  EVIDENCE_VALIDATION = 'evidence_validation',
+  COMPLIANCE_SCORE = 'compliance_score',
+  QUALITY_GATE_PASS_RATE = 'quality_gate_pass_rate',
+  AUTO_APPROVAL_RATE = 'auto_approval_rate',
+
   // Application Metrics
   CORE_WEB_VITALS = 'core_web_vitals',
   JAVASCRIPT_PERFORMANCE = 'javascript_performance',
@@ -89,6 +120,43 @@ export interface AgentMetrics {
       handoffsReceived: number;
       handoffsSent: number;
       avgHandoffTime: number;
+    };
+    // Context Engineering Metrics (ROADMAP Phase 1)
+    contextMetrics: {
+      hitRate: number; // percentage
+      searchLatency: number; // milliseconds
+      confidenceScore: number; // 0-1
+      relevantContexts: number;
+      contextQualityScore: number; // 0-1
+    };
+    // Workflow Metrics (ROADMAP Phase 1)
+    workflowMetrics: {
+      currentStage: string;
+      stageProgress: number; // 0-1
+      evidenceCollected: number;
+      qualityGatesPassed: number;
+      deviationsCount: number;
+      avgExecutionTime: number; // milliseconds
+    };
+    
+    // Provider Adapter Metrics (ROADMAP Phase 3)
+    providerMetrics: {
+      providerId: string;
+      tier: string;
+      requestsTotal: number;
+      avgResponseTime: number;
+      successRate: number;
+      errorRate: number;
+      tokensUsed: number;
+    };
+    
+    // Evidence-Based Delivery Metrics (ROADMAP Phase 3)
+    evidenceMetrics: {
+      artifactsCollected: number;
+      validationScore: number;
+      complianceScore: number;
+      qualityGatePassRate: number;
+      autoApprovalRate: number;
     };
   };
 }
@@ -161,6 +229,24 @@ export enum AlertType {
   SYSTEM_HEALTH = 'system_health',
   CORE_WEB_VITALS = 'core_web_vitals',
   ERROR_RATE = 'error_rate',
+  // Context Engineering Alerts (ROADMAP Phase 1)
+  CONTEXT_CORRUPTION = 'context_corruption',
+  CONTEXT_HIT_RATE_LOW = 'context_hit_rate_low',
+  // Workflow Alerts (ROADMAP Phase 1)
+  WORKFLOW_FAILURE = 'workflow_failure',
+  QUALITY_GATE_FAILURE = 'quality_gate_failure',
+  HANDOFF_DELAY = 'handoff_delay',
+  ESCALATION_SPIKE = 'escalation_spike',
+
+  // Provider Adapter Alerts (ROADMAP Phase 3)
+  PROVIDER_ERROR = 'provider_error',
+  MODEL_MIGRATION_FAILED = 'model_migration_failed',
+  PROVIDER_DEGRADATION = 'provider_degradation',
+
+  // Evidence-Based Delivery Alerts (ROADMAP Phase 3)
+  EVIDENCE_COLLECTION_FAILED = 'evidence_collection_failed',
+  COMPLIANCE_VIOLATION = 'compliance_violation',
+  QUALITY_GATE_BLOCKED = 'quality_gate_blocked',
   CUSTOM = 'custom'
 }
 
@@ -288,6 +374,205 @@ export interface Context7Query {
   success: boolean;
   error?: string;
   tokensReturned: number;
+}
+
+/**
+ * Context Engineering Metrics (ROADMAP Phase 1)
+ */
+export interface ContextMetrics {
+  id: string;
+  agentType: AgentType;
+  agentId: string;
+  timestamp: Date;
+  query: string;
+  executionTime: number; // milliseconds
+  hitRate: number; // percentage
+  contextCount: number;
+  avgConfidence: number; // 0-1
+  topContextType: string;
+  searchLatency: number; // milliseconds
+  success: boolean;
+  error?: string;
+  contextEntries: Array<{
+    id: string;
+    type: string;
+    confidence: number;
+    relevanceScore: number;
+  }>;
+}
+
+/**
+ * Workflow Execution Metrics (ROADMAP Phase 1)
+ */
+export interface WorkflowMetrics {
+  id: string;
+  workflowId: string;
+  agentType: AgentType;
+  agentId: string;
+  stage: string;
+  timestamp: Date;
+  command: string;
+  executionTime: number; // milliseconds
+  success: boolean;
+  status: string;
+  contextHitRate: number; // percentage
+  evidenceCount: number;
+  qualityGateStatus: 'passed' | 'failed' | 'pending';
+  deviationsCount: number;
+  handoffLatency?: number; // milliseconds
+  metadata: Record<string, any>;
+}
+
+/**
+ * Quality Gate Metrics (ROADMAP Phase 1)
+ */
+export interface QualityGateMetrics {
+  id: string;
+  workflowId: string;
+  stage: string;
+  qualityGateId: string;
+  agentType: AgentType;
+  timestamp: Date;
+  status: 'passed' | 'failed' | 'pending';
+  score: number; // 0-1
+  criteriaCount: number;
+  criteriaPassed: number;
+  evidenceTypes: string[];
+  executionTime: number; // milliseconds
+  autoApproved: boolean;
+  deviations: Array<{
+    criteria: string;
+    expected: number;
+    actual: number;
+    severity: string;
+  }>;
+}
+
+/**
+ * Evidence Collection Metrics (ROADMAP Phase 1)
+ */
+export interface EvidenceMetrics {
+  id: string;
+  workflowId: string;
+  stage: string;
+  agentType: AgentType;
+  timestamp: Date;
+  evidenceType: string;
+  confidence: number; // 0-1
+  artifacts: string[];
+  collectionTime: number; // milliseconds
+  autoGenerated: boolean;
+  validated: boolean;
+  qualityScore: number; // 0-1
+}
+
+/**
+ * Handoff Metrics (ROADMAP Phase 1)
+ */
+export interface HandoffMetrics {
+  id: string;
+  workflowId: string;
+  fromAgent: AgentType;
+  toAgent: AgentType;
+  timestamp: Date;
+  contextSize: number;
+  artifactCount: number;
+  latency: number; // milliseconds
+  success: boolean;
+  acknowledged: boolean;
+  accepted: boolean;
+  qualityPreservation: number; // 0-1
+}
+
+/**
+ * Escalation Metrics (ROADMAP Phase 1)
+ */
+export interface EscalationMetrics {
+  id: string;
+  workflowId: string;
+  stage: string;
+  agentType: AgentType;
+  timestamp: Date;
+  severity: string;
+  issue: string;
+  resolutionTime?: number; // milliseconds
+  resolved: boolean;
+  impact: string;
+  preventable: boolean;
+}
+
+/**
+ * Provider Adapter Metrics (ROADMAP Phase 3)
+ */
+export interface ProviderAdapterMetrics {
+  id: string;
+  providerId: string;
+  tier: string;
+  timestamp: Date;
+  
+  // Usage
+  requestsTotal: number;
+  requestsSuccess: number;
+  requestsFailed: number;
+  
+  // Performance
+  avgResponseTime: number;
+  p95ResponseTime: number;
+  p99ResponseTime: number;
+  
+  // Resources
+  tokensUsed: number;
+  tokensGenerated: number;
+  
+  // Errors
+  errorCount: number;
+  errorTypes: Record<string, number>;
+  
+  // Quality
+  successRate: number;
+  availability: number; // percentage
+  
+  // Model selection
+  selections: number;
+  migrations: number;
+  migrationsFailed: number;
+}
+
+/**
+ * Evidence-Based Delivery Metrics (ROADMAP Phase 3)
+ */
+export interface EvidenceDeliveryMetrics {
+  id: string;
+  workflowId: string;
+  timestamp: Date;
+  
+  // Evidence collection
+  artifactsCollected: number;
+  artifactsRequired: number;
+  collectionSuccessRate: number;
+  avgCollectionTime: number;
+  
+  // Validation
+  validationsPassed: number;
+  validationsFailed: number;
+  avgValidationScore: number;
+  
+  // Compliance
+  complianceScore: number;
+  criteriaSatisfied: number;
+  criteriaFailed: number;
+  
+  // Quality gates
+  qualityGatesPassed: number;
+  qualityGatesFailed: number;
+  autoApprovalRate: number;
+  
+  // By type
+  byType: Record<string, {
+    collected: number;
+    validated: number;
+    avgScore: number;
+  }>;
 }
 
 /**
